@@ -10,7 +10,8 @@ Automates the full deployment of an isolated CoPyRIT GUI instance:
   3. Entra security group (optional — can use existing)
   4. Azure SQL server + database
   5. Storage account + blob container (auto-injects container URL into .env)
-  6. Key Vault + populate .env secret (auto-injects SQL connection string)
+  6. Key Vault + populate .env secret (auto-injects SQL connection string;
+     applies SFI network lockdown)
   7. Managed identity + RBAC role assignments (AcrPull, KV Secrets User, Storage Blob Data Contributor)
   7b. AOAI RBAC (optional — Cognitive Services OpenAI User on specified resources)
   8. Bicep deployment (Container App, networking, logging)
@@ -620,7 +621,14 @@ def create_key_vault(
     tags: list[str] | None = None,
 ) -> str:
     """
-    Create a Key Vault and populate it with the .env secret.
+    Create a Key Vault, populate it with the .env secret, then apply the SFI
+    network lockdown.
+
+    The vault is created with public network access enabled so that the deployer
+    (running from a corp network or dev container) can write the initial secret.
+    After the secret is uploaded, the vault is locked down to match the team
+    standard pattern observed on other AIRT vaults
+    (publicNetworkAccess=Disabled + defaultAction=Deny + bypass=AzureServices).
 
     Args:
         resource_group (str): The resource group name.
@@ -733,6 +741,27 @@ def create_key_vault(
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
+
+    # Apply SFI network lockdown after secret upload. Matches the team standard
+    # observed on existing AIRT vaults (e.g. airt-chatui-kv, AIRT-Blackhat-KV):
+    # public network access disabled, default-deny ACL, bypass for trusted
+    # Azure services. No NSP / private endpoint — the GUI deployment does not
+    # use private networking (see infra/DEPLOY_NEW_INSTANCE.md).
+    logger.info("Applying SFI network lockdown to Key Vault: %s", vault_name)
+    run_az(
+        args=[
+            "keyvault",
+            "update",
+            "--name",
+            vault_name,
+            "--public-network-access",
+            "Disabled",
+            "--default-action",
+            "Deny",
+            "--bypass",
+            "AzureServices",
+        ]
+    )
 
     return kv_id
 
@@ -1225,7 +1254,7 @@ def main(args: list[str] | None = None) -> int:
             storage_container_url=storage["container_url"],
         )
 
-        # Step 7: Create Key Vault + upload .env
+        # Step 7: Create Key Vault + upload .env + apply SFI network lockdown
         kv_id = create_key_vault(
             resource_group=rg_name,
             location=parsed.location,

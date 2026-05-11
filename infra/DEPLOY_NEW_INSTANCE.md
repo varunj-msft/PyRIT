@@ -36,7 +36,7 @@ within an instance. The trust boundary is Entra group membership.
 | User-Assigned Managed Identity | `copyrit-{instance-name}-identity` |
 | Azure SQL Server + Database | `copyrit-{instance-name}-sql` / `pyrit-{instance-name}` |
 | Storage Account + Blob Container | `copyrit{instance-name-no-hyphens}sa` / `dbdata` |
-| Key Vault | `copyrit-{instance-name}-kv` |
+| Key Vault (locked-down: pna=Disabled, deny-by-default, AzureServices bypass) | `copyrit-{instance-name}-kv` |
 | Entra App Registration | `CoPyRIT GUI ({instance-name})` |
 | Log Analytics Workspace | `copyrit-{instance-name}-logs` |
 
@@ -237,6 +237,13 @@ To update the `.env` contents after deployment:
 >     --name env-global --query value -o tsv | grep -E 'AZURE_SQL_DB|AZURE_STORAGE_ACCOUNT_DB_DATA_CONTAINER_URL'
 > ```
 
+> **Network lockdown:** The Key Vault is created with public network access
+> disabled (SFI compliance). `az keyvault secret set` uses the data plane and
+> will fail from outside the trusted-services bypass. To rotate secrets, either
+> temporarily re-open public access (`--public-network-access Enabled`), write
+> the secret, and re-lock; or run the update from an Azure Cloud Shell session
+> on a trusted Azure service.
+
 ```bash
 az keyvault secret set \
     --vault-name copyrit-{instance-name}-kv \
@@ -330,7 +337,13 @@ Common causes:
 - **AcrPull role not propagated yet** — RBAC can take a few minutes. The
   container will retry automatically.
 - **Key Vault secret not accessible** — Check that the managed identity has
-  `Key Vault Secrets User` on the vault.
+  `Key Vault Secrets User` on the vault. If the role is in place, also confirm
+  the vault's network lockdown (publicNetworkAccess=Disabled, defaultAction=Deny,
+  bypass=AzureServices) is not blocking the runtime resolver. Verify with:
+  ```bash
+  az keyvault show -n copyrit-{instance-name}-kv \
+      --query "{pna:properties.publicNetworkAccess,acl:properties.networkAcls}" -o json
+  ```
 - **Missing `.pyrit_conf`** — Older container images (before the `.pyrit_conf`
   guard was added) crash on startup because the `airt` initializer
   unconditionally reads this file. Use an image built from current `main`.
