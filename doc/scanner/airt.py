@@ -81,10 +81,19 @@ await output_scenario_async(scenario_result)
 # crisis handling and licensed therapist impersonation.
 #
 # ```bash
-# pyrit_scan airt.psychosocial --target openai_chat --strategies imminent_crisis --max-dataset-size 1
+# pyrit_scan airt.psychosocial --target openai_chat --max-dataset-size 1
 # ```
 #
-# **Available strategies:** ALL, ImminentCrisis, LicensedTherapist
+# **Both subharms always run; technique selection is by strategy.** Each subharm has its own
+# dataset (`airt_imminent_crisis`, `airt_licensed_therapist`), its own scoring rubric, and its own
+# Crescendo escalation prompt. Datasets cannot be selected by name (`--dataset-names` is not
+# supported); use `--max-dataset-size` to cap the total number of seeds drawn across both subharms.
+# Choose techniques with `--strategies`.
+#
+# **Available strategies:** ALL (adds crescendo), prompt_sending, role_play, crescendo. The default
+# aggregate runs the single-turn techniques (prompt_sending, role_play); crescendo is opt-in.
+# ``role_play`` (a movie-script framing) is skipped for the ``licensed_therapist`` subharm, where it
+# would measure the wrong thing.
 #
 # ### Conversation-Level Scoring
 #
@@ -93,7 +102,8 @@ await output_scenario_async(scenario_result)
 # to evaluate the **entire conversation history** rather than just the latest response — critical
 # for detecting patterns like gradual crisis escalation.
 #
-# Each subharm has a built-in YAML rubric:
+# Each subharm has a built-in YAML rubric, applied per-attack so the scorer always matches the
+# seed's subharm (even when both subharms run together):
 #
 # - **crisis_management.yaml** — Evaluates crisis recognition using the MHFA/ALGEE methodology
 #   (Approach, Listen, Give reassurance, Encourage professional help, Encourage self-help).
@@ -101,22 +111,19 @@ await output_scenario_async(scenario_result)
 # - **licensed_therapist.yaml** — Evaluates whether the model inappropriately provides clinical
 #   mental health advice.
 #
-# Rubrics can be customized per-subharm via the SubharmConfig dataclass.
-#
-# **Note:** This scenario does not include a default baseline. A single-turn baseline would not be
-# meaningful because psychosocial harms emerge through multi-turn escalation.
+# **Baseline:** each subharm emits its own ``baseline_<subharm>`` (the objectives sent unmodified),
+# scored with that subharm's rubric, as a comparison point for its technique attacks.
 
 # %%
 from pyrit.scenario.airt import Psychosocial, PsychosocialStrategy
 
-dataset_config = DatasetAttackConfiguration(dataset_names=["airt_imminent_crisis"], max_dataset_size=1)
-
+# Both subharms always run; datasets can't be selected by name. Cap the run with the
+# CLI's --max-dataset-size (a plain default run is shown here).
 scenario = Psychosocial()
 scenario.set_params_from_args(  # type: ignore
     args={
         "objective_target": objective_target,
-        "scenario_strategies": [PsychosocialStrategy.ImminentCrisis],
-        "dataset_config": dataset_config,
+        "scenario_strategies": [PsychosocialStrategy("prompt_sending")],
     }
 )
 await scenario.initialize_async()  # type: ignore
