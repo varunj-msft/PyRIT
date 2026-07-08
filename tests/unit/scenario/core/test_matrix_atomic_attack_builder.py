@@ -24,9 +24,11 @@ from pyrit.models import SeedAttackGroup, SeedObjective
 from pyrit.prompt_target import PromptTarget
 from pyrit.scenario.core.attack_technique_factory import AttackTechniqueFactory
 from pyrit.scenario.core.matrix_atomic_attack_builder import (
+    BaselineSpec,
     MatrixAtomicAttackBuilder,
     MatrixCombo,
     build_baseline_atomic_attack,
+    build_baseline_atomic_attacks,
     build_matrix_atomic_attacks,
     resolve_technique_factories,
 )
@@ -285,6 +287,65 @@ class TestBuildBaselineHelper:
         )
         assert baseline.atomic_attack_name == "baseline"
         assert baseline._seed_groups == groups
+
+
+@pytest.mark.usefixtures("patch_central_database")
+class TestBuildBaselineAtomicAttacksPlural:
+    """The module-level plural ``build_baseline_atomic_attacks`` helper."""
+
+    def test_one_attack_per_spec_in_order(self):
+        g1 = _seed_group(objective="o1")
+        g2 = _seed_group(objective="o2")
+        specs = [
+            BaselineSpec(seed_groups=[g1], name="baseline_a", display_group="a"),
+            BaselineSpec(seed_groups=[g2], name="baseline_b", display_group="b"),
+        ]
+        baselines = build_baseline_atomic_attacks(
+            objective_target=MagicMock(spec=PromptTarget),
+            default_objective_scorer=MagicMock(spec=TrueFalseScorer),
+            specs=specs,
+            memory_labels={"op": "unit"},
+        )
+        assert [b.atomic_attack_name for b in baselines] == ["baseline_a", "baseline_b"]
+        assert [b.display_group for b in baselines] == ["a", "b"]
+        assert [b._seed_groups for b in baselines] == [[g1], [g2]]
+        assert all(b.is_baseline for b in baselines)
+
+    def test_per_spec_scorer_overrides_default(self):
+        spec_scorer = MagicMock(spec=TrueFalseScorer)
+        default_scorer = MagicMock(spec=TrueFalseScorer)
+        (baseline,) = build_baseline_atomic_attacks(
+            objective_target=MagicMock(spec=PromptTarget),
+            default_objective_scorer=default_scorer,
+            specs=[BaselineSpec(seed_groups=[_seed_group(objective="o1")], objective_scorer=spec_scorer)],
+        )
+        assert baseline._objective_scorer is spec_scorer
+
+    def test_none_spec_scorer_falls_back_to_default(self):
+        default_scorer = MagicMock(spec=TrueFalseScorer)
+        (baseline,) = build_baseline_atomic_attacks(
+            objective_target=MagicMock(spec=PromptTarget),
+            default_objective_scorer=default_scorer,
+            specs=[BaselineSpec(seed_groups=[_seed_group(objective="o1")])],
+        )
+        assert baseline._objective_scorer is default_scorer
+
+    def test_default_spec_name_is_baseline(self):
+        (baseline,) = build_baseline_atomic_attacks(
+            objective_target=MagicMock(spec=PromptTarget),
+            default_objective_scorer=MagicMock(spec=TrueFalseScorer),
+            specs=[BaselineSpec(seed_groups=[_seed_group(objective="o1")])],
+        )
+        assert baseline.atomic_attack_name == "baseline"
+        assert baseline.is_baseline is True
+
+    def test_empty_specs_returns_empty_list(self):
+        result = build_baseline_atomic_attacks(
+            objective_target=MagicMock(spec=PromptTarget),
+            default_objective_scorer=MagicMock(spec=TrueFalseScorer),
+            specs=[],
+        )
+        assert result == []
 
 
 @pytest.mark.usefixtures("patch_central_database")
