@@ -251,6 +251,7 @@ function ParameterInput({
         </div>
       ) : (
         <Input
+          type={parameter.sensitive ? 'password' : 'text'}
           value={value}
           placeholder={parameterDefaultValue(parameter) || undefined}
           onChange={(_, data) => onChange(data.value)}
